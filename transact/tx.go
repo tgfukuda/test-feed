@@ -233,16 +233,14 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 
 	now := time.Now()
 
-	val, age, wat := big.NewInt(calc(now)), big.NewInt(now.Unix()), "jpxjpy"
+	val, age, wat := math.U256(big.NewInt(calc(now))), math.U256(big.NewInt(now.Unix())), "jpxjpy"
 	var watBytes []byte = make([]byte, 32)
-	if len(wat) < 32 {
-		copy(watBytes, []byte(wat))
-	}
+	copy(watBytes, []byte(wat))
 
 	hash := crypto.Keccak256(
 		bytes.Join([][]byte{[]byte("\x19Ethereum Signed Message:\n32")[:]},
 			crypto.Keccak256(
-				bytes.Join([][]byte{math.U256(val).Bytes(), math.U256(age).Bytes(), (*[32]byte)(watBytes)[:]},
+				bytes.Join([][]byte{val.Bytes(), age.Bytes(), watBytes},
 					nil),
 			),
 		),
@@ -265,17 +263,17 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	if err != nil {
 		fmt.Printf("[ERROR] converting failure for %v", err)
 		return nil, err
-	} else {
-		fmt.Printf("r: %v\ns: %v\nv: %v\n", r, s, v)
 	}
 
+	fmt.Printf("val: %v\nage: %v\nr: %v\ns: %v\nv: %v\n", hex.EncodeToString(math.U256Bytes(val)), hex.EncodeToString(math.U256Bytes(age)), hex.EncodeToString(r[:]), hex.EncodeToString(s[:]), v)
 	fmt.Printf("ecrecover: %v\n", ra)
 
 	callOpts := &bind.CallOpts{Pending: true, From: oracle.from}
 	var test []interface{}
-	err = oracle.median.Call(callOpts, &test, "test", (*[32]byte)(math.U256Bytes(val)), (*[32]byte)(math.U256Bytes(age)), v, *r, *s)
+	err = oracle.median.Call(callOpts, &test, "test", val, age, v, r, s)
 	if err != nil {
-		return nil, err
+		oracle.logger.Printf("read: %v\n", err)
+		err = nil
 	} else {
 		address, _ := test[0].(common.Address)
 		oracle.logger.Printf("recovered address: %v\n", address)
@@ -286,8 +284,8 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	go func() {
 		defer close(mine)
 		tx, err := oracle.median.Transact(auth, "poke",
-			[]*big.Int{math.U256(val)},
-			[]*big.Int{math.U256(age)},
+			[]*big.Int{val},
+			[]*big.Int{age},
 			[]uint8{v},
 			[][32]byte{*r},
 			[][32]byte{*s},
@@ -322,12 +320,16 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		oracle.logger.Printf("%s\n", rec)
 		execResult, _ := trace.(map[string]interface{})
 		isFailue, ok := execResult["failed"].(bool)
-		if !ok || isFailue {
-			oracle.logger.Println("contract execution reverted")
-			reasonRaw, _ := execResult["returnValue"].(string)
-			reason, _ := hex.DecodeString(reasonRaw)
-			mine <- TxResult{tx, errors.New(string(reason))}
+		if !ok {
 			return
+		} else {
+			if isFailue {
+				oracle.logger.Println("execution reverted")
+				reasonRaw, _ := execResult["returnValue"].(string)
+				reason, _ := hex.DecodeString(reasonRaw)
+				mine <- TxResult{tx, errors.New(string(reason))}
+				return
+			}
 		}
 		mine <- TxResult{tx, err}
 		return

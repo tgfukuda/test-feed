@@ -80,10 +80,9 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 				}
 				if err != nil {
 					logger.Println(err)
-				} else {
-					s, _ := json.MarshalIndent(tx, "", "\t")
-					logger.Printf("%s\n", s)
 				}
+				s, _ := json.MarshalIndent(tx, "", "\t")
+				logger.Printf("%s\n", s)
 			}
 
 			feed()
