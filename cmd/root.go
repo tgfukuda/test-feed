@@ -5,17 +5,44 @@ Copyright © 2022 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
+
 	"github.com/spf13/cobra"
 )
 
 type Options struct {
-	interval uint16
 	endpoint string
 	name     string
 	keystore string
 	password string
 	osm      string
 	median   string
+}
+
+func getAddresses(addressPath string) (map[string]interface{}, error) {
+	addressFile, err := os.Open(addressPath)
+	if err != nil {
+		fmt.Println("[ERROR] failed to open address file")
+		return nil, err
+	}
+	defer addressFile.Close()
+
+	bytes, err := ioutil.ReadAll(addressFile)
+	if err != nil {
+		fmt.Println("[ERROR] failed to read address file")
+		return nil, err
+	}
+
+	var addresses map[string]interface{}
+	if err := json.Unmarshal([]byte(bytes), &addresses); err != nil {
+		fmt.Println("[ERROR] failed to parse json")
+		return nil, err
+	}
+
+	return addresses, nil
 }
 
 func NewRootCommand(opts *Options) *cobra.Command {
@@ -27,13 +54,6 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		SilenceUsage:  true,
 	}
 
-	rootCmd.PersistentFlags().Uint16VarP(
-		&opts.interval,
-		"interval",
-		"i",
-		3600,
-		"interval of each transaction",
-	)
 	rootCmd.PersistentFlags().StringVarP(
 		&opts.name,
 		"token",
@@ -50,10 +70,11 @@ func NewRootCommand(opts *Options) *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(
 		&opts.keystore,
 		"keystore",
-		"f",
-		"~/.dapp/testnet/8545/keystore/",
+		"k",
+		"~/.dapp/testnet/8545/keystore",
 		"keystore json path",
 	)
+	rootCmd.MarkPersistentFlagFilename("keystore")
 	rootCmd.PersistentFlags().StringVarP(
 		&opts.password,
 		"password",
@@ -67,15 +88,18 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		"./median/out/MedianJPXJPY.abi",
 		"Median ABI file",
 	)
+	rootCmd.MarkPersistentFlagRequired("median")
 	rootCmd.PersistentFlags().StringVar(
 		&opts.osm,
 		"osm",
 		"./osm/out/OSM.abi",
 		"OSM ABI file",
 	)
+	rootCmd.MarkPersistentFlagRequired("osm")
 
 	rootCmd.AddCommand(
 		newFeedCommand(opts),
+		newPriceCmd(opts),
 	)
 
 	return rootCmd

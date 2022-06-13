@@ -4,8 +4,10 @@ set -euo pipefail
 
 ## environments
 MEDIAN_DIR=${1:-$HOME/median}
-TOKENPAIR=${2:-JPXJPY}
-OSM_DIR=${3:-$HOME/osm}
+FROM=${2:-JPY}
+TO=${3:-JPX}
+TOKENPAIR=$TO$FROM
+OSM_DIR=${4:-$HOME/osm}
 
 EXTRACT_ABI=true
 
@@ -18,6 +20,8 @@ export ETH_FROM=$(cat $BASEDIR/testnet/$PORT/config/account)
 export ETH_KEYSTORE=$BASEDIR/testnet/$PORT/keystore
 export ETH_PASSWORD=/dev/null
 export ETH_GAS=7000000
+
+EXPORT_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}) && pwd)
 
 ## deploy oracle
 ### build medianizer
@@ -44,7 +48,10 @@ OSM=$(dapp create OSM $MEDIAN | tail -n 1)
 seth send $MEDIAN 'lift(address[])' "[$ETH_FROM]" &&
 seth send $MEDIAN "setBar(uint256)" $(seth --to-uint256 1) &&
 ### give osm median access
-seth send $MEDIAN "kiss(address)(uint256)" $OSM
+seth send $MEDIAN "kiss(address)" "$OSM"
+### for debug
+seth send $OSM "kiss(address)" "$ETH_FROM"
+seth send $MEDIAN "kiss(address)" "$ETH_FROM"
 
 if $EXTRACT_ABI; then
     cd $MEDIAN_DIR && dapp --use solc:0.5.12 build --extract && [[ ! -f out/Median$TOKENPAIR.abi ]] && echo "[INFO] failed to extract Median abi"
@@ -54,3 +61,10 @@ fi
 echo ""
 echo "MEDIAN=$MEDIAN"
 echo "OSM=$OSM"
+
+echo $EXPORT_DIR/addresses.json
+cat << EOF > $EXPORT_DIR/addresses.json
+{
+    "PIP_$TO": "$OSM"
+}
+EOF
