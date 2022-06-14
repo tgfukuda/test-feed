@@ -74,7 +74,7 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 			quit := make(chan bool, 1)
 
 			feed := func() {
-				tx, err := oracle.Poke(func(ts time.Time) int64 { return 100 })
+				tx, err := oracle.Poke(func(ts time.Time) int64 { return ts.Unix() })
 				if tx != nil {
 					logger.Printf("[INFO] sent transaction %s", tx.Hash().Hex())
 				}

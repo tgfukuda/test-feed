@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -32,8 +31,15 @@ type Oracle struct {
 	logger  *log.Logger
 }
 
-var castError = errors.New("Invalid casting")
-var invalidPriceError = errors.New("Invalid price. oracle may not be initialized")
+//errors
+var (
+	castError         = errors.New("Invalid casting")
+	invalidPriceError = errors.New("Invalid price. oracle may not be initialized")
+)
+
+var (
+	Zero = big.NewInt(0)
+)
 
 func New(endpoint string, privateKey *ecdsa.PrivateKey, osm string, osmAbi string, medianAbi string, logger *log.Logger) (*Oracle, error) {
 	oracle, err := initOsm(endpoint, privateKey, osm, osmAbi, logger)
@@ -109,20 +115,48 @@ func getContract(address common.Address, abiPath string, client *rpc.Client) (*b
 	return contract, nil
 }
 
-func (oracle *Oracle) initMedian(callOpts *bind.CallOpts, medianAbi string) error {
+func callMethod1[T interface{}](contract *bind.BoundContract, callOpts *bind.CallOpts, method string, args ...interface{}) (*T, error) {
 	var result []interface{}
-	err := oracle.osm.Call(callOpts, &result, "src")
+	err := contract.Call(callOpts, &result, method, args...)
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to get medianizer")
-		return err
+		return nil, err
 	}
 
-	address, ok := result[0].(common.Address)
+	conversion, ok := result[0].(T)
 	if !ok {
-		return castError
+		return nil, castError
 	}
 
-	contract, err := getContract(address, medianAbi, oracle.client)
+	return &conversion, nil
+}
+
+func callMethod2[T interface{}, S interface{}](contract *bind.BoundContract, callOpts *bind.CallOpts, method string, args ...interface{}) (*T, *S, error) {
+	var result []interface{}
+	err := contract.Call(callOpts, &result, method, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	conversion1, ok := result[0].(T)
+	if !ok {
+		return nil, nil, castError
+	}
+
+	conversion2, ok := result[1].(S)
+	if !ok {
+		return nil, nil, castError
+	}
+
+	return &conversion1, &conversion2, nil
+}
+
+func (oracle *Oracle) initMedian(callOpts *bind.CallOpts, medianAbi string) error {
+	address, err := callMethod1[common.Address](oracle.osm, &bind.CallOpts{Pending: true, From: oracle.from}, "src")
+	if err != nil {
+		oracle.logger.Printf("[ERROR] failed to get median address")
+	}
+
+	contract, err := getContract(*address, medianAbi, oracle.client)
 	if err != nil {
 		return err
 	}
@@ -134,68 +168,42 @@ func (oracle *Oracle) initMedian(callOpts *bind.CallOpts, medianAbi string) erro
 	return nil
 }
 
-func (oracle *Oracle) GetMedianPrice() (uint64, error) {
-	var result []interface{}
-	err := oracle.median.Call(&bind.CallOpts{Pending: true, From: oracle.from}, &result, "peek")
+func (oracle *Oracle) GetMedianPrice() (*big.Int, error) {
+	price, valid, err := callMethod2[*big.Int, bool](oracle.median, &bind.CallOpts{Pending: true, From: oracle.from}, "peek")
 	if err != nil {
-		return 0, err
+		return Zero, err
+	}
+	if !*valid {
+		return Zero, invalidPriceError
 	}
 
-	price, ok := result[0].(*big.Int)
-	if !ok {
-		return 0, castError
-	}
-	valid, ok := result[1].(bool)
-	if !ok {
-		return 0, castError
-	}
-
-	if !valid {
-		return 0, invalidPriceError
-	}
-
-	return price.Uint64(), nil
+	return *price, nil
 }
 
-func (oracle *Oracle) GetOsmPrice() (uint64, uint64, error) {
+func (oracle *Oracle) GetOsmPrice() (*big.Int, *big.Int, error) {
 	callOpts := &bind.CallOpts{Pending: true, From: oracle.from}
-	var result []interface{}
-	err := oracle.osm.Call(callOpts, &result, "peek")
+
+	next_, valid, err := callMethod2[[32]byte, bool](oracle.osm, callOpts, "peep")
 	if err != nil {
-		return 0, 0, err
+		return Zero, Zero, err
+	}
+	if !*valid {
+		return Zero, Zero, invalidPriceError
 	}
 
-	curr, ok := result[0].([32]byte)
-	if !ok {
-		return 0, 0, castError
-	}
-	valid, ok := result[1].(bool)
-	if !ok {
-		return 0, 0, castError
-	}
-	if !valid {
-		return 0, 0, invalidPriceError
-	}
+	next := new(big.Int).SetBytes(next_[:])
 
-	result = make([]interface{}, 0)
-	err = oracle.osm.Call(callOpts, &result, "peep")
+	curr_, valid, err := callMethod2[[32]byte, bool](oracle.osm, callOpts, "peek")
 	if err != nil {
-		return 0, 0, err
+		return Zero, next, err
 	}
+	if !*valid {
+		oracle.logger.Printf("[WARNING] osm has no current value. `poke` may have been called only once")
+		return Zero, next, err
+	}
+	curr := new(big.Int).SetBytes(curr_[:])
 
-	next, ok := result[0].([32]byte)
-	if !ok {
-		return 0, 0, castError
-	}
-	valid_, ok := result[1].(bool)
-	if !ok {
-		return 0, 0, castError
-	}
-	if !valid_ {
-		return 0, 0, invalidPriceError
-	}
-
-	return binary.BigEndian.Uint64(curr[:]), binary.BigEndian.Uint64(next[:]), nil
+	return curr, next, nil
 }
 
 type Calculator func(ts time.Time) int64
@@ -209,7 +217,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	ethClient := ethclient.NewClient(oracle.client)
 	nonce, err := ethClient.PendingNonceAt(context.Background(), oracle.from)
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to calculate nonce for")
+		oracle.logger.Println("[ERROR] failed to calculate nonce")
 		return nil, err
 	}
 
@@ -220,6 +228,10 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	}
 
 	chainId, err := ethClient.ChainID(context.Background())
+	if err != nil {
+		oracle.logger.Println("[ERROR] failed to get chain id")
+		return nil, err
+	}
 
 	auth, err := bind.NewKeyedTransactorWithChainID(oracle.privKey, chainId)
 	if err != nil {
@@ -233,16 +245,22 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 
 	now := time.Now()
 
-	val, age, wat := math.U256(big.NewInt(calc(now))), math.U256(big.NewInt(now.Unix())), "jpxjpy"
+	val, age, wat := big.NewInt(calc(now)), big.NewInt(now.Unix()), "jpxjpy"
 	var watBytes []byte = make([]byte, 32)
 	copy(watBytes, []byte(wat))
 
 	hash := crypto.Keccak256(
-		bytes.Join([][]byte{[]byte("\x19Ethereum Signed Message:\n32")[:]},
-			crypto.Keccak256(
-				bytes.Join([][]byte{val.Bytes(), age.Bytes(), watBytes},
-					nil),
-			),
+		bytes.Join(
+			[][]byte{
+				[]byte("\x19Ethereum Signed Message:\n32"),
+				crypto.Keccak256(
+					bytes.Join(
+						[][]byte{math.U256Bytes(val), math.U256Bytes(age), watBytes},
+						nil,
+					),
+				),
+			},
+			nil,
 		),
 	)
 
@@ -255,43 +273,21 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 
 	r := (*[32]byte)(sig[0:32])
 	s := (*[32]byte)(sig[32:64])
-	v := sig[64]
+	v := 27 + uint8(sig[64])
 
-	ad, _ := crypto.Ecrecover(hash, sig)
-	rp, err := crypto.UnmarshalPubkey(ad)
-	ra := crypto.PubkeyToAddress(*rp)
-	if err != nil {
-		fmt.Printf("[ERROR] converting failure for %v", err)
-		return nil, err
-	}
-
-	fmt.Printf("val: %v\nage: %v\nr: %v\ns: %v\nv: %v\n", hex.EncodeToString(math.U256Bytes(val)), hex.EncodeToString(math.U256Bytes(age)), hex.EncodeToString(r[:]), hex.EncodeToString(s[:]), v)
-	fmt.Printf("ecrecover: %v\n", ra)
-
-	callOpts := &bind.CallOpts{Pending: true, From: oracle.from}
-	var test []interface{}
-	err = oracle.median.Call(callOpts, &test, "test", val, age, v, r, s)
-	if err != nil {
-		oracle.logger.Printf("read: %v\n", err)
-		err = nil
-	} else {
-		address, _ := test[0].(common.Address)
-		oracle.logger.Printf("recovered address: %v\n", address)
-	}
-
-	mine := make(chan TxResult)
+	miner := make(chan TxResult)
 
 	go func() {
-		defer close(mine)
+		defer close(miner)
 		tx, err := oracle.median.Transact(auth, "poke",
-			[]*big.Int{val},
-			[]*big.Int{age},
+			[]*big.Int{math.U256(val)},
+			[]*big.Int{math.U256(age)},
 			[]uint8{v},
 			[][32]byte{*r},
 			[][32]byte{*s},
 		)
 		if err != nil {
-			mine <- TxResult{nil, err}
+			miner <- TxResult{nil, err}
 			return
 		}
 		oracle.logger.Writer().Write([]byte(oracle.logger.Prefix() + "sending transaction..."))
@@ -303,7 +299,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		block, err := ethClient.BlockByNumber(context.Background(), nil)
 		if err != nil {
 			oracle.logger.Println("[ERROR] failed to get block")
-			mine <- TxResult{nil, err}
+			miner <- TxResult{nil, err}
 			return
 		}
 		blockhash := block.Hash()
@@ -312,26 +308,33 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		err = oracle.client.Call(&trace, "debug_traceTransaction", tx.Hash())
 		if err != nil {
 			oracle.logger.Println("[ERROR] failed to get stack trace")
-			mine <- TxResult{tx, err}
+			miner <- TxResult{tx, err}
 			return
 		}
 		receipt, err := ethClient.TransactionReceipt(context.Background(), tx.Hash())
-		rec, _ := receipt.MarshalJSON()
+		if err != nil {
+			miner <- TxResult{tx, err}
+		}
+		rec, err := receipt.MarshalJSON()
+		if err != nil {
+			miner <- TxResult{tx, err}
+		}
 		oracle.logger.Printf("%s\n", rec)
 		execResult, _ := trace.(map[string]interface{})
 		isFailue, ok := execResult["failed"].(bool)
 		if !ok {
+			miner <- TxResult{tx, castError}
 			return
 		} else {
 			if isFailue {
 				oracle.logger.Println("execution reverted")
 				reasonRaw, _ := execResult["returnValue"].(string)
 				reason, _ := hex.DecodeString(reasonRaw)
-				mine <- TxResult{tx, errors.New(string(reason))}
+				miner <- TxResult{tx, errors.New(string(reason))}
 				return
 			}
 		}
-		mine <- TxResult{tx, err}
+		miner <- TxResult{tx, err}
 		return
 	}()
 
@@ -340,7 +343,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		return nil, err
 	}
 
-	result := <-mine
+	result := <-miner
 	if result.error != nil {
 		return result.Transaction, result.error
 	}

@@ -67,19 +67,14 @@ func priceCmd(opts *Options, subOpts *PriceOption) *cobra.Command {
 					fmt.Println("[ERROR] failed to get median price")
 					return err
 				}
-				logger.Printf(`
-					price: %d
-				`, price)
+				logger.Printf("price: %d", price)
 			} else {
 				curr, next, err := oracle.GetOsmPrice()
 				if err != nil {
 					fmt.Println("[ERROR] failed to get osm price")
 					return err
 				}
-				logger.Printf(`
-					current: %d,
-					next   : %d   
-				`, curr, next)
+				logger.Printf("current: %d, next: %d", curr, next)
 			}
 
 			return oracle.Delete()
