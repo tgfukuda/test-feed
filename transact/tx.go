@@ -320,7 +320,11 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 			miner <- TxResult{tx, err}
 		}
 		oracle.logger.Printf("%s\n", rec)
-		execResult, _ := trace.(map[string]interface{})
+		execResult, ok := trace.(map[string]interface{})
+		if !ok {
+			miner <- TxResult{tx, castError}
+			return
+		}
 		isFailue, ok := execResult["failed"].(bool)
 		if !ok {
 			miner <- TxResult{tx, castError}

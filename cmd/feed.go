@@ -88,6 +88,7 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 			feed()
 
 			go func() {
+				defer close(quit)
 				for {
 					select {
 					case <-trap:

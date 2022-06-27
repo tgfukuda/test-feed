@@ -4,9 +4,9 @@ set -euo pipefail
 
 ## environments
 MEDIAN_DIR=${1:-$HOME/median}
-FROM=${2:-JPY}
-TO=${3:-JPX}
-TOKENPAIR=$TO$FROM
+FROM=${2:-JPX}
+TO=${3:-JPY}
+TOKENPAIR=$FROM$TO
 OSM_DIR=${4:-$HOME/osm}
 
 EXTRACT_ABI=true
