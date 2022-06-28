@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"log"
 
 	"github.com/spf13/cobra"
 	"github.com/tgfukuda/test-feed/transact"
+	"github.com/tgfukuda/test-feed/util"
 )
 
 type PriceOption struct {
@@ -31,25 +31,22 @@ func priceCmd(opts *Options, subOpts *PriceOption) *cobra.Command {
 	return &cobra.Command{
 		Use:   "price",
 		Args:  cobra.ExactArgs(1),
-		Short: "",
+		Short: "get prices from the contract",
 		Long:  ``,
 		RunE: func(_ *cobra.Command, args []string) (err error) {
 			addressPath := args[0]
 			addresses, err := getAddresses(addressPath)
 			if err != nil {
-				fmt.Println("[ERROR] failed to parse addresses")
 				return err
 			}
 
 			privKey, err := transact.GetPrivFromFile(opts.keystore, opts.password)
 			if err != nil {
-				fmt.Println("[ERROR] failed to initialize priv key")
 				return err
 			}
 
 			osm, ok := addresses[OraclePrefix+opts.name].(string)
 			if !ok {
-				fmt.Println("[ERROR] invalid median address")
 				return errors.New("failure in casting address to string")
 			}
 
@@ -57,22 +54,19 @@ func priceCmd(opts *Options, subOpts *PriceOption) *cobra.Command {
 
 			oracle, err := transact.New(opts.endpoint, privKey, osm, opts.osm, opts.median, logger)
 			if err != nil {
-				fmt.Println("[ERROR] failed to initialize oracle")
 				return err
 			}
 
 			if subOpts.direct {
 				price, err := oracle.GetMedianPrice()
 				if err != nil {
-					fmt.Println("[ERROR] failed to get median price")
-					return err
+					return util.ChainError(errors.New("failed to get median price"), err)
 				}
 				logger.Printf("price: %d", price)
 			} else {
 				curr, next, err := oracle.GetOsmPrice()
 				if err != nil {
-					fmt.Println("[ERROR] failed to get osm price")
-					return err
+					return util.ChainError(errors.New("failed to get osm price"), err)
 				}
 				logger.Printf("current: %d, next: %d", curr, next)
 			}

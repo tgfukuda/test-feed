@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tgfukuda/test-feed/transact"
 )
-
-const OraclePrefix = "PIP_"
 
 type FeedOption struct {
 	interval uint16
@@ -38,25 +35,22 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 	return &cobra.Command{
 		Use:   "feed",
 		Args:  cobra.ExactArgs(1),
-		Short: "",
+		Short: "running feed client",
 		Long:  ``,
 		RunE: func(_ *cobra.Command, args []string) (err error) {
 			addressPath := args[0]
 			addresses, err := getAddresses(addressPath)
 			if err != nil {
-				fmt.Println("[ERROR] failed to parse addresses")
 				return err
 			}
 
 			privKey, err := transact.GetPrivFromFile(opts.keystore, opts.password)
 			if err != nil {
-				fmt.Println("[ERROR] failed to initialize priv key")
 				return err
 			}
 
 			osm, ok := addresses[OraclePrefix+opts.name].(string)
 			if !ok {
-				fmt.Println("[ERROR] invalid median address")
 				return errors.New("failure in casting address to string")
 			}
 
@@ -64,12 +58,11 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 
 			oracle, err := transact.New(opts.endpoint, privKey, osm, opts.osm, opts.median, logger)
 			if err != nil {
-				fmt.Println("[ERROR] failed to initialize oracle")
 				return err
 			}
 
 			trap := make(chan os.Signal, 1)
-			signal.Notify(trap, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGINT, os.Interrupt)
+			signal.Notify(trap, syscall.SIGTERM, syscall.SIGINT, os.Interrupt)
 
 			quit := make(chan bool, 1)
 

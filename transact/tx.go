@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/tgfukuda/test-feed/util"
 )
 
 type Oracle struct {
@@ -33,9 +34,25 @@ type Oracle struct {
 
 //errors
 var (
-	castError         = errors.New("Invalid casting")
-	invalidPriceError = errors.New("Invalid price. oracle may not be initialized")
+	errCast          = errors.New("invalid casting")
+	errInvalidPrice  = errors.New("invalid price. oracle may not be initialized")
+	errConnectingRpc = errors.New("failed to initialize rpc client")
+	errExportPubkey  = errors.New("failed to export pub key")
+	errParseAbi      = errors.New("failed to parse given abi")
+	errGetMedian     = errors.New("failed to get median address")
+	errCalcNonce     = errors.New("failed to calculate nonce")
+	errCalcGas       = errors.New("failed to calculate gas price")
+	errChainId       = errors.New("failed to get chain id")
+	errTransactObj   = errors.New("failed to get transact object")
+	errGetBlock      = errors.New("failed to get block")
+	errGetStackTrace = errors.New("failed to get stack trace")
 )
+
+func errAbiPath(path string) error {
+	return fmt.Errorf("failed to open abi file %s", path)
+}
+
+var warnPokeOnce = "osm has no current value. `poke` may have been called only once"
 
 var (
 	Zero = big.NewInt(0)
@@ -64,15 +81,13 @@ func (oracle *Oracle) Delete() error {
 func initOsm(endpoint string, privateKey *ecdsa.PrivateKey, osm string, osmAbi string, logger *log.Logger) (*Oracle, error) {
 	client, err := rpc.DialHTTP(endpoint)
 	if err != nil {
-		fmt.Println("[ERROR] failed to initialize rpc client")
-		return nil, err
+		return nil, util.ChainError(errConnectingRpc, err)
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		fmt.Println("[ERROR] failed to export pub key")
-		return nil, err
+		return nil, errExportPubkey
 	}
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
@@ -99,15 +114,13 @@ func initOsm(endpoint string, privateKey *ecdsa.PrivateKey, osm string, osmAbi s
 func getContract(address common.Address, abiPath string, client *rpc.Client) (*bind.BoundContract, error) {
 	abiFile, err := os.Open(abiPath)
 	if err != nil {
-		fmt.Printf("[ERROR] failed to open abi file %s\n", abiPath)
-		return nil, err
+		return nil, util.ChainError(errAbiPath(abiPath), err)
 	}
 	defer abiFile.Close()
 
 	parsed, err := abi.JSON(abiFile)
 	if err != nil {
-		fmt.Println("[ERROR] failed to parse oracle abi")
-		return nil, err
+		return nil, util.ChainError(errParseAbi, err)
 	}
 	ethClient := ethclient.NewClient(client)
 	contract := bind.NewBoundContract(address, parsed, ethClient, ethClient, ethClient)
@@ -124,7 +137,7 @@ func callMethod1[T interface{}](contract *bind.BoundContract, callOpts *bind.Cal
 
 	conversion, ok := result[0].(T)
 	if !ok {
-		return nil, castError
+		return nil, errCast
 	}
 
 	return &conversion, nil
@@ -139,12 +152,12 @@ func callMethod2[T interface{}, S interface{}](contract *bind.BoundContract, cal
 
 	conversion1, ok := result[0].(T)
 	if !ok {
-		return nil, nil, castError
+		return nil, nil, errCast
 	}
 
 	conversion2, ok := result[1].(S)
 	if !ok {
-		return nil, nil, castError
+		return nil, nil, errCast
 	}
 
 	return &conversion1, &conversion2, nil
@@ -153,7 +166,7 @@ func callMethod2[T interface{}, S interface{}](contract *bind.BoundContract, cal
 func (oracle *Oracle) initMedian(callOpts *bind.CallOpts, medianAbi string) error {
 	address, err := callMethod1[common.Address](oracle.osm, &bind.CallOpts{Pending: true, From: oracle.from}, "src")
 	if err != nil {
-		oracle.logger.Printf("[ERROR] failed to get median address")
+		return util.ChainError(errGetMedian, err)
 	}
 
 	contract, err := getContract(*address, medianAbi, oracle.client)
@@ -174,7 +187,7 @@ func (oracle *Oracle) GetMedianPrice() (*big.Int, error) {
 		return Zero, err
 	}
 	if !*valid {
-		return Zero, invalidPriceError
+		return Zero, errInvalidPrice
 	}
 
 	return *price, nil
@@ -188,7 +201,7 @@ func (oracle *Oracle) GetOsmPrice() (*big.Int, *big.Int, error) {
 		return Zero, Zero, err
 	}
 	if !*valid {
-		return Zero, Zero, invalidPriceError
+		return Zero, Zero, errInvalidPrice
 	}
 
 	next := new(big.Int).SetBytes(next_[:])
@@ -198,8 +211,8 @@ func (oracle *Oracle) GetOsmPrice() (*big.Int, *big.Int, error) {
 		return Zero, next, err
 	}
 	if !*valid {
-		oracle.logger.Printf("[WARNING] osm has no current value. `poke` may have been called only once")
-		return Zero, next, err
+		oracle.logger.Printf(warnPokeOnce)
+		return Zero, next, nil
 	}
 	curr := new(big.Int).SetBytes(curr_[:])
 
@@ -217,26 +230,22 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	ethClient := ethclient.NewClient(oracle.client)
 	nonce, err := ethClient.PendingNonceAt(context.Background(), oracle.from)
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to calculate nonce")
-		return nil, err
+		return nil, util.ChainError(errCalcNonce, err)
 	}
 
 	gasPrice, err := ethClient.SuggestGasPrice(context.Background())
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to calculate gas price")
-		return nil, err
+		return nil, util.ChainError(errCalcGas, err)
 	}
 
 	chainId, err := ethClient.ChainID(context.Background())
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to get chain id")
-		return nil, err
+		return nil, util.ChainError(errChainId, err)
 	}
 
 	auth, err := bind.NewKeyedTransactorWithChainID(oracle.privKey, chainId)
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to get transact object")
-		return nil, err
+		return nil, util.ChainError(errTransactObj, err)
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0)      // in wei
@@ -249,31 +258,13 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 	var watBytes []byte = make([]byte, 32)
 	copy(watBytes, []byte(wat))
 
-	hash := crypto.Keccak256(
-		bytes.Join(
-			[][]byte{
-				[]byte("\x19Ethereum Signed Message:\n32"),
-				crypto.Keccak256(
-					bytes.Join(
-						[][]byte{math.U256Bytes(val), math.U256Bytes(age), watBytes},
-						nil,
-					),
-				),
-			},
-			nil,
-		),
-	)
-
-	//https://github.com/ethereum/go-ethereum/blob/v1.10.18/crypto/signature_cgo.go#L55
-	sig, err := crypto.Sign(hash, oracle.privKey)
-	if err != nil || len(sig) != 65 {
-		oracle.logger.Println("[ERROR] failed to sign")
+	r, s, v, err := Sign(oracle.privKey, bytes.Join(
+		[][]byte{math.U256Bytes(val), math.U256Bytes(age), watBytes},
+		nil,
+	))
+	if err != nil {
 		return nil, err
 	}
-
-	r := (*[32]byte)(sig[0:32])
-	s := (*[32]byte)(sig[32:64])
-	v := 27 + uint8(sig[64])
 
 	miner := make(chan TxResult)
 
@@ -298,8 +289,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		oracle.logger.Writer().Write([]byte("\n"))
 		block, err := ethClient.BlockByNumber(context.Background(), nil)
 		if err != nil {
-			oracle.logger.Println("[ERROR] failed to get block")
-			miner <- TxResult{nil, err}
+			miner <- TxResult{nil, util.ChainError(errGetBlock, err)}
 			return
 		}
 		blockhash := block.Hash()
@@ -307,8 +297,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		var trace interface{}
 		err = oracle.client.Call(&trace, "debug_traceTransaction", tx.Hash())
 		if err != nil {
-			oracle.logger.Println("[ERROR] failed to get stack trace")
-			miner <- TxResult{tx, err}
+			miner <- TxResult{tx, util.ChainError(errGetStackTrace, err)}
 			return
 		}
 		receipt, err := ethClient.TransactionReceipt(context.Background(), tx.Hash())
@@ -323,11 +312,11 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		execResult, _ := trace.(map[string]interface{})
 		isFailue, ok := execResult["failed"].(bool)
 		if !ok {
-			miner <- TxResult{tx, castError}
+			miner <- TxResult{tx, errCast}
 			return
 		} else {
 			if isFailue {
-				oracle.logger.Println("execution reverted")
+				oracle.logger.Println("[INFO] execution reverted")
 				reasonRaw, _ := execResult["returnValue"].(string)
 				reason, _ := hex.DecodeString(reasonRaw)
 				miner <- TxResult{tx, errors.New(string(reason))}
@@ -335,11 +324,9 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 			}
 		}
 		miner <- TxResult{tx, err}
-		return
 	}()
 
 	if err != nil {
-		oracle.logger.Println("[ERROR] failed to send transaction")
 		return nil, err
 	}
 
