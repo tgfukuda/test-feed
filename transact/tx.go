@@ -311,7 +311,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		oracle.logger.Printf("%s\n", rec)
 		execResult, ok := trace.(map[string]interface{})
 		if !ok {
-			miner <- TxResult{tx, castError}
+			miner <- TxResult{tx, errCast}
 			return
 		}
 		isFailue, ok := execResult["failed"].(bool)
