@@ -31,15 +31,12 @@ func Prefix(message []byte) []byte {
 }
 
 func Hash(median_ *big.Int, age_ time.Time, wat_ string) []byte {
-	// Median:
 	median := make([]byte, 32)
 	median_.FillBytes(median)
 
-	// Time:
 	age := make([]byte, 32)
 	binary.BigEndian.PutUint64(age[24:], uint64(age_.Unix()))
 
-	// Asset name:
 	wat := make([]byte, 32)
 	copy(wat, wat_)
 

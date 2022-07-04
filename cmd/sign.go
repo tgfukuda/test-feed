@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -14,6 +16,23 @@ import (
 
 type SignOption struct {
 	prefix bool
+	json   bool
+}
+
+type SignedJson struct {
+	Price `json:"price"`
+}
+
+type Price struct {
+	Wat     string `json:"wat"`
+	Age     int64  `json:"age"`
+	Val     string `json:"val"`
+	R       string `json:"r"`
+	S       string `json:"s"`
+	V       string `json:"v"`
+	StarkR  string `json:"stark_r"`
+	StarkS  string `json:"stark_s"`
+	StarkPk string `json:"stark_pk"`
 }
 
 func newSignCommand(opts *Options) *cobra.Command {
@@ -24,6 +43,13 @@ func newSignCommand(opts *Options) *cobra.Command {
 		"web3-prefix",
 		false,
 		"serialize data with web3.js prefix",
+	)
+	cmd.Flags().BoolVarP(
+		&subOpts.json,
+		"json",
+		"j",
+		false,
+		"output with json format",
 	)
 
 	return cmd
@@ -74,19 +100,43 @@ func signCommand(opts *Options, subOpts *SignOption) *cobra.Command {
 			// 	hash = transact.SHA3(message)
 			// }
 
-			msg := transact.Hash(val_, age_, wat)
-			hash = transact.Prefix(msg)
+			message := transact.Hash(val_, age_, wat)
+			hash = transact.Prefix(message)
 
 			r, s, v, err = transact.Sign(privKey, hash)
 			if err != nil {
 				return err
 			}
 
-			//fmt.Println("message:", "0x"+hex.EncodeToString(message))
-			fmt.Println("hash   :", "0x"+hex.EncodeToString(hash))
-			fmt.Println("r      :", "0x"+hex.EncodeToString(r[:]))
-			fmt.Println("s      :", "0x"+hex.EncodeToString(s[:]))
-			fmt.Println("v      :", "0x"+hex.EncodeToString([]byte{v}))
+			const hexPrefix = "0x"
+
+			if subOpts.json {
+				marshall := SignedJson{
+					Price{
+						Wat:     wat,
+						Age:     age_.Unix(),
+						Val:     val_.String(),
+						R:       hexPrefix + hex.EncodeToString(r[:]),
+						S:       hexPrefix + hex.EncodeToString(s[:]),
+						V:       hexPrefix + hex.EncodeToString([]byte{v}),
+						StarkR:  hexPrefix + "0",
+						StarkS:  hexPrefix + "0",
+						StarkPk: hexPrefix + "0",
+					},
+				}
+				buf, err := json.Marshal(&marshall)
+				if err != nil {
+					return errors.New("failed to marshall")
+				}
+
+				fmt.Printf("%s\n", buf)
+			} else {
+				fmt.Println("message:", hexPrefix+hex.EncodeToString(message))
+				fmt.Println("hash   :", hexPrefix+hex.EncodeToString(hash))
+				fmt.Println("r      :", hexPrefix+hex.EncodeToString(r[:]))
+				fmt.Println("s      :", hexPrefix+hex.EncodeToString(s[:]))
+				fmt.Println("v      :", hexPrefix+hex.EncodeToString([]byte{v}))
+			}
 
 			return nil
 		},
