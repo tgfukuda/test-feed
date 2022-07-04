@@ -65,6 +65,6 @@ echo "OSM=$OSM"
 echo $EXPORT_DIR/addresses.json
 cat << EOF > $EXPORT_DIR/addresses.json
 {
-    "PIP_$TO": "$OSM"
+    "PIP_$FROM": "$OSM"
 }
 EOF

@@ -47,7 +47,7 @@ func priceCmd(opts *Options, subOpts *PriceOption) *cobra.Command {
 
 			osm, ok := addresses[OraclePrefix+opts.name].(string)
 			if !ok {
-				return errors.New("failure in casting address to string")
+				return util.ErrCast
 			}
 
 			logger := log.Default()

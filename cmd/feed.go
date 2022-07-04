@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tgfukuda/test-feed/transact"
+	"github.com/tgfukuda/test-feed/util"
 )
 
 type FeedOption struct {
@@ -51,7 +51,7 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 
 			osm, ok := addresses[OraclePrefix+opts.name].(string)
 			if !ok {
-				return errors.New("failure in casting address to string")
+				return util.ErrCast
 			}
 
 			logger := log.Default()

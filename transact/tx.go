@@ -34,7 +34,6 @@ type Oracle struct {
 
 //errors
 var (
-	errCast          = errors.New("invalid casting")
 	errInvalidPrice  = errors.New("invalid price. oracle may not be initialized")
 	errConnectingRpc = errors.New("failed to initialize rpc client")
 	errExportPubkey  = errors.New("failed to export pub key")
@@ -44,6 +43,7 @@ var (
 	errCalcGas       = errors.New("failed to calculate gas price")
 	errChainId       = errors.New("failed to get chain id")
 	errTransactObj   = errors.New("failed to get transact object")
+	errInvalidHash   = errors.New("invalid hash length")
 	errGetBlock      = errors.New("failed to get block")
 	errGetStackTrace = errors.New("failed to get stack trace")
 )
@@ -137,7 +137,7 @@ func callMethod1[T interface{}](contract *bind.BoundContract, callOpts *bind.Cal
 
 	conversion, ok := result[0].(T)
 	if !ok {
-		return nil, errCast
+		return nil, util.ErrCast
 	}
 
 	return &conversion, nil
@@ -152,12 +152,12 @@ func callMethod2[T interface{}, S interface{}](contract *bind.BoundContract, cal
 
 	conversion1, ok := result[0].(T)
 	if !ok {
-		return nil, nil, errCast
+		return nil, nil, util.ErrCast
 	}
 
 	conversion2, ok := result[1].(S)
 	if !ok {
-		return nil, nil, errCast
+		return nil, nil, util.ErrCast
 	}
 
 	return &conversion1, &conversion2, nil
@@ -256,12 +256,17 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 
 	val, age, wat := big.NewInt(calc(now)), big.NewInt(now.Unix()), "jpxjpy"
 	var watBytes []byte = make([]byte, 32)
-	copy(watBytes, []byte(wat))
+	copy(watBytes, wat)
 
-	r, s, v, err := Sign(oracle.privKey, bytes.Join(
+	hash := bytes.Join(
 		[][]byte{math.U256Bytes(val), math.U256Bytes(age), watBytes},
 		nil,
-	))
+	)
+	if len(hash) != 96 {
+		return nil, errInvalidHash
+	}
+
+	r, s, v, err := Sign(oracle.privKey, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -311,12 +316,12 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		oracle.logger.Printf("%s\n", rec)
 		execResult, ok := trace.(map[string]interface{})
 		if !ok {
-			miner <- TxResult{tx, errCast}
+			miner <- TxResult{tx, util.ErrCast}
 			return
 		}
 		isFailue, ok := execResult["failed"].(bool)
 		if !ok {
-			miner <- TxResult{tx, errCast}
+			miner <- TxResult{tx, util.ErrCast}
 			return
 		} else {
 			if isFailue {
