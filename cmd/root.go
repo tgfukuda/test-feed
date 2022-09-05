@@ -103,6 +103,7 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		newPriceCmd(opts),
 		newSignCommand(opts),
 		newRecoverCommand(opts),
+		newExportPrivCommand(opts),
 	)
 
 	return rootCmd
