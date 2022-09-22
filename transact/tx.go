@@ -281,7 +281,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		oracle.logger.Writer().Write([]byte(oracle.logger.Prefix() + "sending transaction..."))
 		for pending := true; pending; _, pending, _ = ethClient.TransactionByHash(context.Background(), tx.Hash()) {
 			oracle.logger.Writer().Write([]byte("."))
-			time.Sleep(time.Duration(500) * time.Microsecond)
+			time.Sleep(time.Duration(3000) * time.Microsecond)
 		}
 		oracle.logger.Writer().Write([]byte("\n"))
 		block, err := ethClient.BlockByNumber(context.Background(), nil)
