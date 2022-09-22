@@ -60,7 +60,7 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		&opts.name,
 		"token",
 		"t",
-		"JPX",
+		"ETH",
 		"target token name",
 	)
 	rootCmd.PersistentFlags().StringVar(

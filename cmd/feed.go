@@ -3,11 +3,13 @@ package cmd
 import (
 	"encoding/json"
 	"log"
+	"math/big"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/spf13/cobra"
 	"github.com/tgfukuda/test-feed/transact"
 	"github.com/tgfukuda/test-feed/util"
@@ -67,7 +69,10 @@ func feedCommand(opts *Options, subOpts *FeedOption) *cobra.Command {
 			quit := make(chan bool, 1)
 
 			feed := func() {
-				tx, err := oracle.Poke(func(ts time.Time) int64 { return ts.Unix() })
+				tx, err := oracle.Poke(func(ts time.Time) *big.Int {
+					price, _ := math.ParseBig256("100000000000000000000000")
+					return price
+				})
 				if tx != nil {
 					logger.Printf("[INFO] sent transaction %s", tx.Hash().Hex())
 				}

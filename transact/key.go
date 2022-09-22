@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/tgfukuda/test-feed/util"
@@ -59,7 +60,11 @@ func Sign(privKey *ecdsa.PrivateKey, hash []byte) (*[32]byte, *[32]byte, byte, e
 	//https://github.com/ethereum/go-ethereum/blob/v1.10.18/crypto/signature_cgo.go#L55
 	sig, err := crypto.Sign(hash, privKey)
 	if err != nil {
-		return nil, nil, 0, util.ChainError(errFailedToSig, err)
+		return nil, nil, 0, util.ChainError(errFailedToSig,
+			util.ChainError(errors.New((hexutil.Encode(hash))),
+				err,
+			),
+		)
 	} else if len(sig) != 65 || math.MaxUint8 < uint8(sig[64])-27 {
 		return nil, nil, 0, util.ChainError(errFailedToSig, errInvalidSignature)
 	}

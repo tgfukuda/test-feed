@@ -1,7 +1,6 @@
 package transact
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -43,7 +42,6 @@ var (
 	errCalcGas       = errors.New("failed to calculate gas price")
 	errChainId       = errors.New("failed to get chain id")
 	errTransactObj   = errors.New("failed to get transact object")
-	errInvalidHash   = errors.New("invalid hash length")
 	errGetBlock      = errors.New("failed to get block")
 	errGetStackTrace = errors.New("failed to get stack trace")
 )
@@ -219,7 +217,7 @@ func (oracle *Oracle) GetOsmPrice() (*big.Int, *big.Int, error) {
 	return curr, next, nil
 }
 
-type Calculator func(ts time.Time) int64
+type Calculator func(ts time.Time) *big.Int
 
 type TxResult struct {
 	*types.Transaction
@@ -254,17 +252,11 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 
 	now := time.Now()
 
-	val, age, wat := big.NewInt(calc(now)), big.NewInt(now.Unix()), "jpxjpy"
+	val, age, wat := calc(now), now, "ethjpy"
 	var watBytes []byte = make([]byte, 32)
 	copy(watBytes, wat)
 
-	hash := bytes.Join(
-		[][]byte{math.U256Bytes(val), math.U256Bytes(age), watBytes},
-		nil,
-	)
-	if len(hash) != 96 {
-		return nil, errInvalidHash
-	}
+	hash := Prefix(Hash(val, age, wat))
 
 	r, s, v, err := Sign(oracle.privKey, hash)
 	if err != nil {
@@ -277,7 +269,7 @@ func (oracle *Oracle) Poke(calc Calculator) (*types.Transaction, error) {
 		defer close(miner)
 		tx, err := oracle.median.Transact(auth, "poke",
 			[]*big.Int{math.U256(val)},
-			[]*big.Int{math.U256(age)},
+			[]*big.Int{math.U256(big.NewInt(age.Unix()))},
 			[]uint8{v},
 			[][32]byte{*r},
 			[][32]byte{*s},
